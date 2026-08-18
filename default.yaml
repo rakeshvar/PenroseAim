@@ -1,0 +1,44 @@
+spur:
+  symmetry: 6
+  num_tiles: 96
+  num_ret_tiles: 120
+  translation_canvas: null
+  seed: null
+  rotation_canvas: 3.141592653589793
+  rotation_mask: 0.7853981633974483
+
+model:
+  d_model: 128
+  num_heads: 8
+  num_layers: 8
+  num_global_tokens: 4
+  class_embed_dim: 64
+  time_embed_dim: 64
+  dropout: 0.1
+
+flow:
+  loss: l2
+  lambda_inness: 0.25
+  lsa_workers: 8
+
+train:
+  batch_size: 64
+  num_epochs: 101
+  steps_per_epoch: 1400
+  learning_rate: 0.001
+  weight_decay: 0.01
+  min_lr_factor: 0.1
+  grad_clip: 1.0
+  precision: fp32
+  sample_steps: 100
+  sample_batch_size: 1
+  seed: 0
+  device: cuda
+
+wandb:
+  enable: true
+  project: penrose-aim
+
+output:
+  directory: outputs
+  resume: null
