@@ -315,8 +315,9 @@ def train(config: Config, *, reset_optimizer: bool = False) -> Path | None:
             )
             sample_lattice_loss = lattice_loss(
                 config.spur.symmetry,
-                sample[..., :2],
                 spur.side,
+                sample,
+                colors,
             ).item()
             geometric_loss = geometry_sum / config.train.steps_per_epoch
             inness_loss = inness_sum / config.train.steps_per_epoch

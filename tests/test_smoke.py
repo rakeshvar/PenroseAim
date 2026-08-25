@@ -20,6 +20,7 @@ from config import FlowConfig, config_from_dict, make_names  # noqa: E402
 from losses import inness_weighted_velocity_loss  # noqa: E402
 from model import DirectTransformer  # noqa: E402
 from sampler import (  # noqa: E402
+    _spur_flow_geometry,
     build_spur,
     make_generator,
     prepare_flow_batch,
@@ -229,6 +230,14 @@ def check_fresh_process_resume(root: Path) -> None:
     assert (root / "inness_probs.csv").exists()
 
 
+def check_circular_flow_geometry() -> None:
+    source = torch.tensor([[[0.0, 0.0, 1.70]]])
+    target = torch.tensor([[[0.0, 0.0, -1.70]]])
+    state, velocity = _spur_flow_geometry.flow(source, target, torch.tensor([0.5]))
+    assert abs(state[..., 2].item()) > 1.69
+    assert 0.0 < velocity[..., 2].item() < 0.1
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="penrose-aim-smoke-") as temporary:
         root = Path(temporary)
@@ -236,6 +245,7 @@ def main() -> None:
         check_model_path(6, root / "direct-6")
         check_identifier_contract(root / "identifier")
         check_soft_inness_weighting()
+        check_circular_flow_geometry()
         check_retention(root / "retention")
         check_fresh_process_resume(root / "resume")
     print("PenroseAim smoke test passed")

@@ -48,12 +48,14 @@ def _load_spur_file(name: str) -> Any:
 
 _spur_sampler = _load_spur_file("sampler")
 _spur_match = _load_spur_file("match")
+_spur_flow_geometry = _load_spur_file("flow_geometry")
 _spur_utils = _load_spur_file("utils")
+_spur_lattice_loss = _load_spur_file("lattice_loss")
 _spur_convert = _load_spur_file("convert")
 _spur_svg = _load_spur_file("svg")
 SpurSampler = _spur_sampler.SpurSampler
 ANGLE_SCALE = _spur_sampler.ANGLE_SCALE
-lattice_loss = _spur_utils.lattice_loss
+lattice_loss = _spur_lattice_loss.lattice_loss
 get_colors = _spur_utils.get_colors
 
 
@@ -139,10 +141,10 @@ def prepare_flow_batch(
         config.train.batch_size, device=spur.device, generator=generator
     )
     path_time = torch.sin(unit_time * math.pi / 2.0)
-    noisy_geometry = torch.lerp(
+    noisy_geometry, target_velocity = _spur_flow_geometry.flow(
         match_result.matched_noise,
         data_geometry,
-        path_time[:, None, None],
+        path_time,
     )
     reveal = torch.rand(
         target_vertex_in.shape,
@@ -160,7 +162,7 @@ def prepare_flow_batch(
     )
     return PreparedFlowBatch(
         noisy_state=noisy_state,
-        target_velocity=data_geometry - match_result.matched_noise,
+        target_velocity=target_velocity,
         target_inness=target_inness,
         target_vertex_in=target_vertex_in,
         colors=colors,
@@ -240,8 +242,10 @@ def reverse_sample(
     for start, end in zip(path_grid[:-1], path_grid[1:]):
         time = start.expand(batch_size)
         prediction = model(state, colors, time, labels)
-        state[..., :3].add_(
-            prediction[..., :3] * (end - start)
+        state[..., :3] = _spur_flow_geometry.flow_step(
+            state[..., :3],
+            prediction[..., :3],
+            end - start,
         )
         newly_revealed = (~revealed) & (reveal_times <= end)
         sampled_vertex_in = torch.rand(
