@@ -9,13 +9,10 @@ import math
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
-import tempfile
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageDraw
 import torch
 
 from config import Config, config_from_dict, effective_translation
@@ -32,6 +29,7 @@ if not (SPUR_DIR / "sampler.py").exists():
         f"PenroseSpur not found at {SPUR_DIR}; set PENROSE_SPUR_PATH"
     )
 sys.path.insert(0, str(SPUR_DIR))
+from show import VideoOptions, save_tiles_svg, save_trajectory_mp4  # noqa: E402
 
 
 def _load_spur_file(name: str) -> Any:
@@ -287,19 +285,15 @@ def save_sample_svg(
 ) -> Path:
     """Save the first generated sample using PenroseSpur's SVG renderer."""
     decoded = decoded_sample(state[:1], colors[:1])
-    centers = torch.stack((decoded["x"][0], decoded["y"][0]), dim=-1)
-    polygons = _spur_convert.vertices(
-        symmetry,
-        centers.detach().cpu().numpy(),
-        decoded["theta"][0].detach().cpu().numpy(),
-        colors[0].detach().cpu().numpy(),
-        side,
+    xya = torch.stack(
+        (decoded["x"][0], decoded["y"][0], decoded["theta"][0]), dim=-1
     )
-    return _spur_svg.save_polygons(
+    return save_tiles_svg(
         path,
-        polygons,
+        xya,
         colors[0],
-        palette=symmetry,
+        symmetry=symmetry,
+        side=side,
         show_arcs=symmetry == 5,
         opacities=decoded["s"][0],
     )
@@ -343,12 +337,6 @@ def frame_tiles(
     return polygons, decoded["s"][0].detach().cpu().numpy()
 
 
-def composite_over_white(color: str, opacity: float) -> tuple[int, int, int]:
-    base = tuple(int(color[index : index + 2], 16) for index in (1, 3, 5))
-    alpha = min(max(float(opacity), 0.0), 1.0)
-    return tuple(round(255 + alpha * (channel - 255)) for channel in base)
-
-
 def save_video(
     path: Path,
     trajectory: torch.Tensor,
@@ -358,72 +346,26 @@ def save_video(
     size: int,
     fps: int,
 ) -> Path:
-    rendered = [
-        frame_tiles(frame, colors, symmetry, side) for frame in trajectory
-    ]
-    polygons = [frame[0] for frame in rendered]
-    opacities = [frame[1] for frame in rendered]
-    all_vertices = np.concatenate(polygons, axis=0)
-    minimum = all_vertices.min(axis=(0, 1))
-    maximum = all_vertices.max(axis=(0, 1))
-    center = (minimum + maximum) / 2.0
-    span = max(float((maximum - minimum).max()), 1e-6) * 1.1
-    scale = size / span
-    palette = _spur_svg.PALETTES[symmetry]
-    color_values = colors[0].detach().cpu().numpy()
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="penrose-aim-video-") as temporary:
-        frame_directory = Path(temporary)
-        for index, (vertices, frame_opacities) in enumerate(
-            zip(polygons, opacities)
-        ):
-            image = Image.new("RGB", (size, size), "white")
-            draw = ImageDraw.Draw(image)
-            for polygon, color, opacity in zip(
-                vertices, color_values, frame_opacities
-            ):
-                points = [
-                    (
-                        (float(x) - center[0]) * scale + size / 2,
-                        (center[1] - float(y)) * scale + size / 2,
-                    )
-                    for x, y in polygon
-                ]
-                draw.polygon(
-                    points,
-                    fill=composite_over_white(
-                        palette[int(color)], float(opacity)
-                    ),
-                    outline=composite_over_white("#333333", float(opacity)),
-                    width=1,
-                )
-            image.save(frame_directory / f"frame_{index:04d}.png")
-
-        command = [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "error",
-            "-framerate",
-            str(fps),
-            "-i",
-            str(frame_directory / "frame_%04d.png"),
-            "-vf",
-            "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            str(path),
-        ]
-        try:
-            subprocess.run(command, check=True)
-        except FileNotFoundError as error:
-            raise RuntimeError("ffmpeg is required to create a video") from error
-        except subprocess.CalledProcessError as error:
-            raise RuntimeError(f"ffmpeg failed with exit code {error.returncode}") from error
-    return path
+    xya_frames = []
+    opacity_frames = []
+    for frame in trajectory:
+        decoded = decoded_sample(frame, colors)
+        xya_frames.append(
+            torch.stack(
+                (decoded["x"][0], decoded["y"][0], decoded["theta"][0]), dim=-1
+            )
+        )
+        opacity_frames.append(decoded["s"][0])
+    return save_trajectory_mp4(
+        xya_frames,
+        colors[0],
+        path,
+        symmetry=symmetry,
+        side=side,
+        opacities=opacity_frames,
+        show_arcs=symmetry == 5,
+        options=VideoOptions(fps=fps, display_height=size),
+    )
 
 
 def _device(name: str) -> torch.device:
